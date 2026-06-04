@@ -1,0 +1,67 @@
+services:
+  # 1. Zookeeper
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  # 2. Kafka
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+
+  # 3. MongoDB
+  mongodb:
+    image: mongo:6
+    container_name: citypulse-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  # 4. Spark Processing (المُحدَّث)
+  spark-processing:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: spark-processing
+    depends_on:
+      - kafka
+      - mongodb
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      MONGO_URI: mongodb://citypulse-mongo:27017/citypulse_db
+      # ✅ إعدادات الذاكرة لـ Java 17 مع Spark
+      JDK_JAVA_OPTIONS: "--add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.invoke=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.net=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.util.concurrent=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/sun.nio.cs=ALL-UNNAMED --add-opens=java.base/sun.security.action=ALL-UNNAMED --add-opens=java.base/sun.util.calendar=ALL-UNNAMED"
+    
+    # ✅ استخدام أحدث الحزم المتوافقة مع Spark 3.5
+    command: >
+      /usr/local/spark/bin/spark-submit
+      --master local[*]
+      --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.3,org.mongodb.spark:mongo-spark-connector_2.12:10.4.0,com.johnsnowlabs.nlp:spark-nlp_2.12:5.5.1
+      /app/spark_nlp_complete.py
+      
+    volumes:
+      - ./spark_nlp_complete.py:/app/spark_nlp_complete.py
+      - ./live_dashboard.py:/app/live_dashboard.py
+
+volumes:
+  mongo_data:
